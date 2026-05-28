@@ -125,7 +125,7 @@ def months_onboard_from(val):
     s = str(val).strip()
     if not s: return None
     now = datetime.datetime.now()
-    if re.fullmatch(r'\d+(\.\d+)?', s):
+    if re.fullmatch(r'\d+(\.\d+)?([eE][+-]?\d+)?', s):   # incl. sci-notation e.g. 1.7242E+12
         f = float(s)
         if f > 1e11:       # epoch milliseconds
             dt = datetime.datetime(1970, 1, 1) + datetime.timedelta(milliseconds=f)
