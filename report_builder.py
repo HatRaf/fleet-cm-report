@@ -275,7 +275,6 @@ def build_page1(fleet_name, vessel_count, date_label):
       <span style="color:#2e3438;font-size:15px;">·</span>
       <span style="color:#667085;font-size:15px;font-weight:500;">{e(date_label)}</span>
     </div>
-    <div style="color:#2e3438;font-size:11px;font-weight:500;letter-spacing:0.04em;">System: AdViSe ATEX Handheld Vibration Monitoring Device</div>
     <div style="flex:1;"></div>
     <div style="height:1px;background:#242424;margin-bottom:22px;"></div>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
