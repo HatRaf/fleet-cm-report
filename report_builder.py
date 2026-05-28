@@ -5,12 +5,12 @@ CSS, and deck-stage JS) and inject data from Excel files.
 
 Usage:
     python3 report_builder.py \
-        --summary  "Hat_CM_Summary_PRONAV_2026-05.xlsx" \
-        --extra    "Hat_CM_Summary_Extra_PRONAV_2026-05.xlsx" \
-        [--summary-prev "Hat_CM_Summary_PRONAV_2026-04.xlsx"] \
-        --template "path/to/Pronav_Fleet_CM_Report_..._Standalone.html" \
-        --fleet    "PRONAV" \
-        --out      "Fleet_CM_Report_PRONAV_2026-05.html"
+        --summary  "Hat_CM_Summary_EXAMPLE_2026-05.xlsx" \
+        --extra    "Hat_CM_Summary_Extra_EXAMPLE_2026-05.xlsx" \
+        [--summary-prev "Hat_CM_Summary_EXAMPLE_2026-04.xlsx"] \
+        --template "path/to/Example_Fleet_CM_Report_..._Standalone.html" \
+        --fleet    "EXAMPLE" \
+        --out      "Fleet_CM_Report_EXAMPLE_2026-05.html"
 
 After generating, convert to PDF:
     node scripts/print_pdf.js output.html output.pdf

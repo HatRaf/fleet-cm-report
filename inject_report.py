@@ -5,8 +5,8 @@ into the staging HTML, producing a final HTML ready for PDF conversion.
 
 Usage:
     python3 inject_report.py \
-        --json "C:\\Fleet Overview Report\\Staging\\PRONAV_2026-05.json" \
-        --out  "C:\\Fleet Overview Report\\Staging\\PRONAV_2026-05_final.html"
+        --json "C:\\Fleet Overview Report\\Staging\\EXAMPLE_2026-05.json" \
+        --out  "C:\\Fleet Overview Report\\Staging\\EXAMPLE_2026-05_final.html"
 """
 
 import argparse
