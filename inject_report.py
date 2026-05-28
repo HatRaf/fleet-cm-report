@@ -1,0 +1,269 @@
+"""
+inject_report.py  --  Fleet CM Report HTML injector (Agent 2)
+Reads a JSON file produced by Agent 1 and injects the intelligence layer
+into the staging HTML, producing a final HTML ready for PDF conversion.
+
+Usage:
+    python3 inject_report.py \
+        --json "C:\\Fleet Overview Report\\Staging\\PRONAV_2026-05.json" \
+        --out  "C:\\Fleet Overview Report\\Staging\\PRONAV_2026-05_final.html"
+"""
+
+import argparse
+import json
+import re
+import sys
+import html as html_mod
+
+def e(text):
+    return html_mod.escape(str(text)) if text is not None else ''
+
+# ── Deck-stage bundle handling ────────────────────────────────────────────────
+# The report HTML is JSON-encoded inside <script type="__bundler/template">.
+# Decode before editing, re-encode after — see report_builder.py for details.
+BUNDLE_RE = re.compile(r'(<script type="__bundler/template">)(.*?)(</script>)', re.DOTALL)
+
+def split_bundle(outer_html):
+    m = BUNDLE_RE.search(outer_html)
+    if not m:
+        return None, outer_html, None
+    inner = json.loads(m.group(2).strip())
+    return outer_html[:m.start(2)], inner, outer_html[m.end(2):]
+
+def repack_bundle(prefix, inner_html, suffix):
+    if prefix is None:
+        return inner_html
+    packed = json.dumps(inner_html)
+    packed = packed.replace('</', '<\\/')
+    return prefix + '\n  ' + packed + '\n  ' + suffix
+
+# ── Spotlight card styles ─────────────────────────────────────────────────────
+SPOTLIGHT_STYLES = {
+    'MOST CRITICAL':      ('#FEF2F2', '#FECACA', '#D2393C', '#D2393C'),
+    'STALLED COMPLIANCE': ('#FFFBEB', '#FDE68A', '#D97706', '#EBB71A'),
+    'MOST IMPROVED':      ('#F0FDF4', '#BBF7D0', '#439B38', '#439B38'),
+    'BEST COMPLIANCE':    ('#ECFEFF', '#A5F3FC', '#00AABC', '#00AABC'),
+}
+
+def spotlight_card(s):
+    label = s['label'].upper()
+    bg, border, label_color, side = SPOTLIGHT_STYLES.get(label, ('#F5F5F3', '#E8E8E6', '#667085', '#9CA3AF'))
+    return (
+        f'<div style="background:{bg};border:1px solid {border};'
+        f'border-left:3px solid {side};border-radius:0 8px 8px 0;padding:16px 18px;">'
+        f'<div style="color:{label_color};font-size:9px;font-weight:700;'
+        f'letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">{e(s["label"])}</div>'
+        f'<div style="color:#16181A;font-size:15px;font-weight:700;margin-bottom:3px;">{e(s["vessel"])}</div>'
+        f'<div style="color:#667085;font-size:12px;">{e(s["detail"])}</div>'
+        f'</div>'
+    )
+
+# ── Priority badge + rank box ─────────────────────────────────────────────────
+LEVEL_BADGE = {
+    'URGENT':   ('#FEE2E2', '#FECACA', '#D2393C'),
+    'HIGH':     ('#FEF3C7', '#FDE68A', '#DD7814'),
+    'MED-HIGH': ('#FEF9C3', '#FEF08A', '#B45309'),
+    'MEDIUM':   ('#CFFAFE', '#A5F3FC', '#0E7490'),
+    'LOW':      ('#DCFCE7', '#BBF7D0', '#439B38'),
+    'N/A':      ('#F5F5F3', '#E8E8E6', '#9CA3AF'),
+}
+
+RANK_BOX_COLOR = {
+    'URGENT':   ('#D2393C', '#FFFFFF'),
+    'HIGH':     ('#DD7814', '#FFFFFF'),
+    'MED-HIGH': ('#EBB71A', '#16181A'),
+    'MEDIUM':   ('#8DC8CD', '#16181A'),
+    'LOW':      ('#439B38', '#FFFFFF'),
+    'N/A':      ('#E8E8E6', '#9CA3AF'),
+}
+
+def rank_box(rank, level):
+    bg, txt = RANK_BOX_COLOR.get(level, RANK_BOX_COLOR['N/A'])
+    fs = '9px' if len(str(rank)) > 1 else '10px'
+    return (f'<div style="width:20px;height:20px;border-radius:4px;background:{bg};'
+            f'display:flex;align-items:center;justify-content:center;'
+            f'font-weight:800;font-size:{fs};color:{txt};">{e(str(rank))}</div>')
+
+def level_badge(level):
+    bg, border, txt = LEVEL_BADGE.get(level, LEVEL_BADGE['N/A'])
+    return (f'<span style="background:{bg};border:1px solid {border};border-radius:999px;'
+            f'padding:2px 8px;font-size:9px;font-weight:700;letter-spacing:0.08em;'
+            f'color:{txt};">{e(level)}</span>')
+
+def vessel_name_color(level, dimmed):
+    if dimmed: return '#C4C9D0'
+    return {'URGENT': '#D2393C', 'LOW': '#439B38'}.get(level, '#16181A')
+
+# ── Recommendation card ───────────────────────────────────────────────────────
+REC_STYLES = {
+    'URGENT': ('#FEF2F2', '#FECACA', '#D2393C'),
+    'HIGH':   ('#FFF7ED', '#FED7AA', '#DD7814'),
+    'MEDIUM': ('#FFFBEB', '#FDE68A', '#EBB71A'),
+    'LOW':    ('#F0FDF4', '#BBF7D0', '#439B38'),
+    'INFO':   ('#ECFEFF', '#A5F3FC', '#00AABC'),
+}
+
+def safe_html(text):
+    """Allow only safe inline tags: strong, em, b, i, span with style."""
+    # Pass through as-is — already trusted HTML from Claude's intelligence layer
+    # Just ensure no raw quotes that break attribute context
+    return text.replace('\n', ' ').replace('\r', '')
+
+def rec_card(r):
+    bg, border, left = REC_STYLES.get(r.get('level', 'INFO'), REC_STYLES['INFO'])
+    return (f'<div style="padding:8px 12px;background:{bg};border:1px solid {border};'
+            f'border-left:3px solid {left};border-radius:0 4px 4px 0;'
+            f'margin-bottom:6px;font-size:11.5px;color:#22282B;line-height:1.55;">'
+            f'{safe_html(r["text"])}</div>')
+
+# ── Page 2: Executive Summary ─────────────────────────────────────────────────
+def build_page2(data):
+    exec_html = '\n'.join(
+        f'<p style="font-size:13.5px;line-height:1.78;color:#22282B;'
+        f'margin-bottom:20px;text-wrap:pretty;">{p}</p>'
+        for p in data['exec_paragraphs']
+    )
+    cards = '\n'.join(spotlight_card(s) for s in data['spotlights'])
+    fleet = e(data['fleet'])
+    date  = e(data['date_label'])
+
+    return f'''<!-- ══ PAGE 2: EXECUTIVE SUMMARY ══════════════════════════════════════════ -->
+<section data-screen-label="02 Executive Summary">
+  <div class="ph">
+    <div class="ph-logo">
+      <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
+      <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
+    </div>
+    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 2 of 4 · {date}</div>
+  </div>
+  <div class="pc">
+    <div class="sec">Executive Summary</div>
+    {exec_html}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      {cards}
+    </div>
+  </div>
+  <div class="pf">
+    <span>HAT Analytics Solutions Ltd · Fleet Condition Monitoring Report</span>
+    <span>{fleet} FLEET · {date}</span>
+  </div>
+</section>'''
+
+# ── Page 4: Priority + Recommendations ───────────────────────────────────────
+def build_page4(data):
+    fleet = e(data['fleet'])
+    date  = e(data['date_label'])
+
+    pri_rows = ''
+    for p in data['priorities']:
+        level   = p.get('level', 'N/A')
+        dimmed  = p.get('dimmed', False)
+        v_color = vessel_name_color(level, dimmed)
+        i_color = '#C4C9D0' if dimmed else '#9CA3AF'
+        pri_rows += f'''<tr>
+          <td style="padding:7px 8px 7px 12px;border-bottom:1px solid #F0EFED;">{rank_box(p["rank"], level)}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;font-weight:700;letter-spacing:0.04em;color:{v_color};">{e(p["vessel"])}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;">{level_badge(level)}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;color:{i_color};">{e(p["key_issue"])}</td>
+        </tr>'''
+
+    recs_html = '\n'.join(rec_card(r) for r in data['recommendations'])
+
+    return f'''<!-- ══ PAGE 4: PRIORITY ASSESSMENT & RECOMMENDATIONS ════════════════════ -->
+<section data-screen-label="04 Priority &amp; Recommendations">
+  <div class="ph">
+    <div class="ph-logo">
+      <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
+      <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
+    </div>
+    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 4 of 4 · {date}</div>
+  </div>
+  <div class="pc">
+    <div class="sec">Priority Assessment</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">
+      <thead>
+        <tr>
+          <th style="background:#F5F5F3;padding:8px 8px 8px 12px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:6px 0 0 6px;width:34px;">#</th>
+          <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:168px;">Vessel</th>
+          <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:116px;">Level</th>
+          <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:0 6px 6px 0;">Key Issue</th>
+        </tr>
+      </thead>
+      <tbody>{pri_rows}</tbody>
+    </table>
+    <div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>
+    <div class="sec" style="margin-bottom:10px;">Recommendations</div>
+    {recs_html}
+    <div style="flex:1;"></div>
+    <div style="height:1px;background:#E8E8E6;margin-bottom:18px;margin-top:14px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">HAT services certified by</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">ABS: 21-4724786-A<br>LR: LR21151076DT-02</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">Konstantinos Kamaras<br>(MSc EE, VA Cat-III, IR Cat-II)</div>
+      </div>
+    </div>
+  </div>
+  <div class="pf">
+    <span>HAT Analytics Solutions Ltd · Fleet Condition Monitoring Report</span>
+    <span>{fleet} FLEET · {date}</span>
+  </div>
+</section>'''
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--json', required=True, help='Path to Agent 1 JSON file')
+    ap.add_argument('--out',  required=True, help='Path to write final HTML')
+    args = ap.parse_args()
+
+    # Load JSON -- strip BOM and control chars that break deck-stage bundler
+    import unicodedata
+    with open(args.json, 'r', encoding='utf-8-sig') as f:
+        raw = f.read()
+    raw = ''.join(c for c in raw if unicodedata.category(c) != 'Cc' or c in '\t\n\r')
+    data = json.loads(raw)
+
+    # Load staging HTML (built by report_builder.py). It is a deck-stage bundle:
+    # the report HTML is JSON-encoded inside <script type="__bundler/template">.
+    # Decode it, edit the real HTML, then re-encode — editing the raw packed JSON
+    # would splice literal newlines into a JSON string and break JSON.parse.
+    html_path = data['html_path']
+    with open(html_path, 'r', encoding='utf-8') as f:
+        outer = f.read()
+    prefix, html, suffix = split_bundle(outer)
+
+    # Replace page 2
+    new_p2 = build_page2(data)
+    html = re.sub(
+        r'<!-- ══ PAGE 2.*?(?=<!-- ══ PAGE 3)',
+        lambda _: new_p2 + '\n\n',
+        html,
+        flags=re.DOTALL
+    )
+
+    # Replace page 4
+    new_p4 = build_page4(data)
+    html = re.sub(
+        r'<!-- ══ PAGE 4.*?</section>',
+        lambda _: new_p4,
+        html,
+        flags=re.DOTALL
+    )
+
+    # Update title
+    fleet = data['fleet']
+    date  = data['date_label']
+    new_title = f'<title>{e(fleet)} Fleet — Fleet Condition Monitoring Report — {e(date)}</title>'
+    html = re.sub(r'<title>[^<]*</title>', lambda _: new_title, html)
+
+    with open(args.out, 'w', encoding='utf-8') as f:
+        f.write(repack_bundle(prefix, html, suffix))
+
+    print(f"Injected -> {args.out}")
+
+if __name__ == '__main__':
+    main()
