@@ -77,6 +77,16 @@ def read_xlsx(path):
             results[sname] = rows
         return results
 
+def read_rows(path):
+    """Return a sheet as a list of row-lists. Supports .csv (plain text, no
+    base64 needed — preferred for cloud transfer) and .xlsx (binary)."""
+    if path.lower().endswith('.csv'):
+        import csv
+        with open(path, newline='', encoding='utf-8-sig') as f:
+            return list(csv.reader(f))
+    sheets = read_xlsx(path)
+    return list(sheets.values())[0] if sheets else []
+
 def rows_to_dicts(rows):
     if not rows:
         return []
@@ -544,9 +554,9 @@ def main():
     date_label = now.strftime('%B %Y')
 
     # Read Excel data
-    sum_rows  = rows_to_dicts(list(read_xlsx(args.summary).values())[0])
-    ext_rows  = rows_to_dicts(list(read_xlsx(args.extra).values())[0]) if args.extra else []
-    prev_rows = rows_to_dicts(list(read_xlsx(args.summary_prev).values())[0]) if args.summary_prev else []
+    sum_rows  = rows_to_dicts(read_rows(args.summary))
+    ext_rows  = rows_to_dicts(read_rows(args.extra)) if args.extra else []
+    prev_rows = rows_to_dicts(read_rows(args.summary_prev)) if args.summary_prev else []
 
     vessels = build_vessel_data(sum_rows, ext_rows, prev_rows)
     active  = [v for v in vessels if not v['inactive']]
