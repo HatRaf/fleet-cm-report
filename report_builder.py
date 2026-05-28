@@ -26,6 +26,12 @@ import xml.etree.ElementTree as ET
 import datetime
 import html as html_mod
 
+# Report signature block — supplied at runtime via env vars so the public repo
+# carries no identifying info. Set HAT_CERTS / HAT_SUPERVISOR / HAT_EMAIL to real values.
+SIG_CERTS      = os.environ.get('HAT_CERTS', 'Certifications on file')
+SIG_SUPERVISOR = os.environ.get('HAT_SUPERVISOR', 'Report supervisor')
+SIG_EMAIL      = os.environ.get('HAT_EMAIL', 'contact@example.com')
+
 # ── Excel reader (zipfile + ElementTree, avoids openpyxl breakage) ────────────
 NS  = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 WNS = {'w': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
@@ -265,18 +271,18 @@ def build_page1(fleet_name, vessel_count, date_label):
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">HAT services certified by</div>
-        <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">ABS: 21-4724786-A<br>LR: LR21151076DT-02</div>
+        <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">{SIG_CERTS}</div>
       </div>
       <div style="text-align:right;">
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
-        <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">Konstantinos Kamaras<br>(MSc EE, VA Cat-III, IR Cat-II)</div>
+        <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
       </div>
     </div>
   </div>
 
   <div style="background:#00AABC;padding:13px 56px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
     <span style="color:#FFFFFF;font-size:12px;font-weight:700;">HAT Analytics Solutions Ltd</span>
-    <span style="color:rgba(255,255,255,0.72);font-size:12px;">info@hat-analytics.net</span>
+    <span style="color:rgba(255,255,255,0.72);font-size:12px;">{SIG_EMAIL}</span>
   </div>
 </section>'''
 
@@ -444,11 +450,11 @@ def build_page4(fleet_name, date_label, priorities, recs):
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">HAT services certified by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">ABS: 21-4724786-A<br>LR: LR21151076DT-02</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_CERTS}</div>
       </div>
       <div style="text-align:right;">
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">Konstantinos Kamaras<br>(MSc EE, VA Cat-III, IR Cat-II)</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
       </div>
     </div>
   </div>

@@ -11,9 +11,15 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import sys
 import html as html_mod
+
+# Report signature block — supplied at runtime via env vars so the public repo
+# carries no identifying info. Set HAT_CERTS / HAT_SUPERVISOR to real values.
+SIG_CERTS      = os.environ.get('HAT_CERTS', 'Certifications on file')
+SIG_SUPERVISOR = os.environ.get('HAT_SUPERVISOR', 'Report supervisor')
 
 def e(text):
     return html_mod.escape(str(text)) if text is not None else ''
@@ -199,11 +205,11 @@ def build_page4(data):
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">HAT services certified by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">ABS: 21-4724786-A<br>LR: LR21151076DT-02</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_CERTS}</div>
       </div>
       <div style="text-align:right;">
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">Konstantinos Kamaras<br>(MSc EE, VA Cat-III, IR Cat-II)</div>
+        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
       </div>
     </div>
   </div>
