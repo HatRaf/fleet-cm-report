@@ -9,10 +9,16 @@ Playwright downloads its own Chromium on first install:
     python3 -m playwright install chromium
 """
 
+import os
 import sys
 import pathlib
 import asyncio
 from playwright.async_api import async_playwright
+
+# Optional system browser. Set CHROME_PATH when Playwright's bundled Chromium
+# can't be downloaded (e.g. a locked-down cloud sandbox with a pre-installed
+# browser). Empty -> use Playwright's own managed Chromium (normal local case).
+CHROME_PATH = os.environ.get("CHROME_PATH", "").strip()
 
 
 async def main():
@@ -31,8 +37,13 @@ async def main():
 
     url = input_path.as_uri()
 
+    launch_kwargs = {}
+    if CHROME_PATH:
+        launch_kwargs["executable_path"] = CHROME_PATH
+        launch_kwargs["args"] = ["--no-sandbox", "--disable-setuid-sandbox"]
+
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch()
+        browser = await pw.chromium.launch(**launch_kwargs)
         page    = await browser.new_page()
         await page.goto(url, wait_until="networkidle")
         await page.wait_for_timeout(1500)   # allow fonts / deck-stage JS to settle
