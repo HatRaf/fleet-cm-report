@@ -1,19 +1,22 @@
 """
 report_builder.py  --  Fleet CM Report HTML generator
 Approach: Use the reference HTML as a template (preserving all embedded assets,
-CSS, and deck-stage JS) and inject data from Excel files.
+CSS, and deck-stage JS) and inject data from the company JSON (cron_fetch.py output;
+legacy .xlsx/.csv are also accepted).
 
 Usage:
     python3 report_builder.py \
-        --summary  "Hat_CM_Summary_EXAMPLE_2026-05.xlsx" \
-        --extra    "Hat_CM_Summary_Extra_EXAMPLE_2026-05.xlsx" \
-        [--summary-prev "Hat_CM_Summary_EXAMPLE_2026-04.xlsx"] \
-        --template "path/to/Example_Fleet_CM_Report_..._Standalone.html" \
-        --fleet    "EXAMPLE" \
-        --out      "Fleet_CM_Report_EXAMPLE_2026-05.html"
+        --summary  "Input files/MAY 2026/ACME.json" \
+        [--summary-prev "Input files/APRIL 2026/ACME.json"] \
+        --template "Skills/template.html" \
+        --fleet    "ACME" \
+        --out      "Reports/ACME/ACME_2026-05_staging.html"
+    # multi-fleet company: add  --tag "Fleet1" [--fleet-label "Fleet 1"] [--include-untagged]
 
-After generating, convert to PDF:
-    node scripts/print_pdf.js output.html output.pdf
+The reporting month is taken from the input's month folder (override: --date-ym YYYY-MM).
+After generating, inject the intelligence layer and convert to PDF:
+    python3 inject_report.py --json intel.json --out final.html
+    python3 print_pdf.py final.html output.pdf
 """
 
 import argparse
@@ -141,17 +144,109 @@ def months_onboard_from(val):
     months = (now.year - dt.year) * 12 + (now.month - dt.month)
     return months if months >= 0 else None
 
+# ── Company JSON reader (cron_fetch.py output) ────────────────────────────────
+# The monthly fetch (Input Script\cron_fetch.py) now drops one JSON per company
+# into Input files\<MONTH>\ instead of the legacy Hat_CM_Summary_*.xlsx. Each
+# API record carries raw rating buckets; we map them to the same summary-row
+# shape build_vessel_data already expects:
+#   rate0 -> Critical   rate1 -> Alert   rate2 -> Minor   rate3 -> Normal
+#   percentage = round(rateN / sys_count * 100)            (denominator confirmed
+#   against legacy Excel: e.g. 136/157 -> 87% Normal)
+# low_usage_alarm is NOT in the API payload, so it is derived: a vessel that has
+# upload history is flagged when its last-100-day upload count (traffic) falls
+# below 70% of its monitored system count. Validated against 5 companies of
+# legacy Excel ground truth (51/51 active vessels matched at 0.70, 0 errors).
+LOW_USAGE_RATIO = 0.70
+
+def read_company_json(path):
+    """Read a cron_fetch.py company JSON and return legacy summary-row dicts."""
+    with open(path, encoding='utf-8') as f:
+        doc = json.load(f)
+    records = doc.get('data', []) if isinstance(doc, dict) else (doc or [])
+    rows = []
+    for r in records:
+        sysc    = safe_int(r.get('sys_count'))
+        traffic = safe_int(r.get('traffic'))
+        uploads = safe_int(r.get('all_uploads'))
+        has_data = uploads is not None and uploads > 0
+        def pct(raw, _sysc=sysc):
+            n = safe_int(raw)
+            if n is None or not _sysc:
+                return None
+            return f'{round(n / _sysc * 100)}%'
+        low_alarm = (has_data and sysc and traffic is not None
+                     and traffic < LOW_USAGE_RATIO * sysc)
+        rows.append({
+            'ship_name':       r.get('ship_name', ''),
+            'tags':            r.get('tags', ''),
+            'all_uploads':     r.get('all_uploads'),
+            'overdue':         r.get('overdue'),
+            'min_upload_date': r.get('min_upload_date'),
+            'critical_pct':    pct(r.get('rate0')),
+            'alert_pct':       pct(r.get('rate1')),
+            'minor_pct':       pct(r.get('rate2')),
+            'normal_pct':      pct(r.get('rate3')),
+            'low_usage_alarm': '1' if low_alarm else '0',
+        })
+    return rows
+
+def company_name_from_json(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f).get('company_name', '') or ''
+    except Exception:
+        return ''
+
+def load_summary(path):
+    """Load a summary file as row-dicts — JSON (cron_fetch.py) or legacy xlsx/csv."""
+    if str(path).lower().endswith('.json'):
+        return read_company_json(path)
+    return rows_to_dicts(read_rows(path))
+
 # ── Filename parsing helpers ──────────────────────────────────────────────────
 def extract_fleet_name(path):
     base = os.path.basename(path)
     parts = base.replace('Hat_CM_Summary_Extra_', '').replace('Hat_CM_Summary_', '').split('_')
     date_idx = next((i for i, p in enumerate(parts) if '-' in p and p[0].isdigit()), len(parts))
-    return '_'.join(parts[:date_idx]).replace('.xlsx', '').upper()
+    return '_'.join(parts[:date_idx]).replace('.xlsx', '').replace('.json', '').upper()
 
 def extract_date_ym(path):
     base = os.path.basename(path)
     m = re.search(r'(\d{4}-\d{2})', base)
     return m.group(1) if m else ''
+
+def derive_report_date(summary_path, override=None):
+    """Determine the reporting month from the DATA, not the wall clock — the
+    report covers the month of its input, regardless of when the routine runs.
+    Resolution order:
+      1. explicit override 'YYYY-MM' (--date-ym)
+      2. a YYYY-MM embedded in the summary filename (legacy xlsx naming)
+      3. the month folder the summary sits in, e.g. '...\\MAY 2026\\ACME.json'
+      4. fallback: current month at runtime (last resort if nothing parses)
+    Returns (date_ym, date_label), e.g. ('2026-05', 'May 2026')."""
+    def fmt(dt):
+        return dt.strftime('%Y-%m'), dt.strftime('%B %Y')
+    # 1. explicit override
+    if override:
+        try:
+            return fmt(datetime.datetime.strptime(override.strip(), '%Y-%m'))
+        except ValueError:
+            pass
+    # 2. YYYY-MM in the filename
+    ym = extract_date_ym(summary_path)
+    if ym:
+        try:
+            return fmt(datetime.datetime.strptime(ym, '%Y-%m'))
+        except ValueError:
+            pass
+    # 3. parent folder named like 'MAY 2026'
+    folder = os.path.basename(os.path.dirname(os.path.abspath(summary_path)))
+    try:
+        return fmt(datetime.datetime.strptime(folder.strip().title(), '%B %Y'))
+    except ValueError:
+        pass
+    # 4. last-resort fallback
+    return fmt(datetime.datetime.now())
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
 def overdue_color(n):
@@ -172,18 +267,41 @@ def pct_color(pct, thresholds):
 def e(text):
     return html_mod.escape(str(text)) if text is not None else ''
 
-def cond_bar(critical, alert, normal):
-    """Inline mini condition bar matching reference exactly."""
-    c = max(critical or 0, 0)
-    a = max(alert or 0, 0)
-    n = max(normal or 0, 0)
-    u = max(100 - c - a - n, 0)
+def trend_arrow(curr, prev):
+    """Month-over-month trend marker for a metric where HIGHER IS WORSE
+    (overdue count, critical %). Shown only when prior-month data exists.
+      increase  -> red up arrow      (got worse)
+      decrease  -> green down arrow  (got better)
+      no change -> faint grey dash
+    Returns '' when curr or prev is missing (e.g. first reporting cycle)."""
+    if curr is None or prev is None:
+        return ''
+    base = 'font-size:9px;font-weight:700;margin-left:4px;vertical-align:1px;'
+    if curr > prev:
+        return f'<span style="color:#D2393C;{base}">&#9650;</span>'   # ▲
+    if curr < prev:
+        return f'<span style="color:#439B38;{base}">&#9660;</span>'   # ▼
+    return f'<span style="color:#C4C9D0;{base}">&#8211;</span>'       # –
+
+def cond_bar(critical, alert, minor, normal):
+    """Inline mini condition bar. Severity order Critical > Alert > Minor >
+    Normal, then the unmonitored remainder. Minor (rate2) was previously
+    omitted, which inflated the grey 'Unmonitored' band — it now has its
+    own segment so the bar sums to the true system population."""
+    c  = max(critical or 0, 0)
+    a  = max(alert or 0, 0)
+    mi = max(minor or 0, 0)
+    n  = max(normal or 0, 0)
+    u  = max(100 - c - a - mi - n, 0)
     parts = []
-    if c > 0: parts.append(f'<div style="flex:{c};background:#D2393C;"></div>')
-    if a > 0: parts.append(f'<div style="flex:{a};background:#DD7814;"></div>')
-    if n > 0: parts.append(f'<div style="flex:{n};background:#439B38;"></div>')
-    if u > 0: parts.append(f'<div style="flex:{u};background:#E8E8E6;"></div>')
-    return f'<div class="mb">{"".join(parts)}</div>'
+    if c  > 0: parts.append(f'<div style="flex:{c};background:#D2393C;"></div>')
+    if a  > 0: parts.append(f'<div style="flex:{a};background:#DD7814;"></div>')
+    if mi > 0: parts.append(f'<div style="flex:{mi};background:#EBB71A;"></div>')
+    if n  > 0: parts.append(f'<div style="flex:{n};background:#439B38;"></div>')
+    if u  > 0: parts.append(f'<div style="flex:{u};background:#E8E8E6;"></div>')
+    # Inline width override: the template .mb class is fixed at 90px; doubling it
+    # to 180px (the Normal % column was removed to free this space).
+    return f'<div class="mb" style="width:180px;">{"".join(parts)}</div>'
 
 def level_badge(level):
     """Priority level badge matching reference exactly."""
@@ -241,19 +359,36 @@ def build_vessel_data(sum_rows, ext_rows, prev_rows=None):
         overdue  = safe_int(r.get('overdue'))
         overdue_prev = safe_int(prev.get('overdue')) if prev else None
         c_pct = safe_pct(r.get('critical_pct') or r.get('critical'))
+        c_pct_prev = safe_pct(prev.get('critical_pct') or prev.get('critical')) if prev else None
         a_pct = safe_pct(r.get('alert_pct') or r.get('alert'))
+        m_pct = safe_pct(r.get('minor_pct') or r.get('minor'))
         n_pct = safe_pct(r.get('normal_pct') or r.get('normal'))
         low_alarm = str(r.get('low_usage_alarm', '')).strip().lower() in ('1', 'yes', 'true')
         vessels.append({
             'name': name, 'months': months, 'overdue': overdue,
             'overdue_prev': overdue_prev, 'critical_pct': c_pct,
-            'alert_pct': a_pct, 'normal_pct': n_pct,
+            'critical_pct_prev': c_pct_prev,
+            'alert_pct': a_pct, 'minor_pct': m_pct, 'normal_pct': n_pct,
             'low_alarm': low_alarm, 'inactive': inactive,
+            'tags': str(r.get('tags', '') or '').strip(),
         })
     return vessels
 
+# ── Fleet (sub-report) helpers ────────────────────────────────────────────────
+def fleet_label_from_tag(tag):
+    """Turn a raw tag into a human label for the cover, e.g. 'Fleet1' -> 'Fleet 1',
+    'GroupA' -> 'Group A'. Inserts a space at letter/digit and word/Capital
+    boundaries. Returns '' for an empty tag."""
+    s = str(tag or '').strip()
+    if not s:
+        return ''
+    s = re.sub(r'(?<=[A-Za-z])(?=\d)', ' ', s)      # letter -> digit
+    s = re.sub(r'(?<=\d)(?=[A-Za-z])', ' ', s)      # digit  -> letter
+    s = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', s)      # 'Group' -> 'A'
+    return s
+
 # ── Page builders ─────────────────────────────────────────────────────────────
-def build_page1(fleet_name, vessel_count, date_label):
+def build_page1(fleet_name, vessel_count, date_label, fleet_label=None):
     return f'''<!-- ══ PAGE 1: COVER ═══════════════════════════════════════════════════════ -->
 <section data-screen-label="01 Cover" style="background:#16181A;color:#FFFFFF;">
   <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="" style="position:absolute;width:500px;opacity:0.028;top:42%;left:50%;transform:translate(-50%,-50%);pointer-events:none;">
@@ -269,7 +404,7 @@ def build_page1(fleet_name, vessel_count, date_label):
   <div style="flex:1;display:flex;flex-direction:column;padding:0 56px;margin-top:88px;position:relative;z-index:1;">
     <div style="color:#00AABC;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:22px;">Fleet Condition Monitoring Report</div>
     <div style="color:#FFFFFF;font-size:80px;font-weight:800;line-height:0.93;letter-spacing:-0.03em;margin-bottom:4px;">{e(fleet_name)}</div>
-    <div style="color:rgba(255,255,255,0.18);font-size:80px;font-weight:200;line-height:0.93;letter-spacing:-0.02em;font-style:italic;margin-bottom:56px;">Fleet</div>
+    <div style="color:rgba(255,255,255,0.18);font-size:80px;font-weight:200;line-height:0.93;letter-spacing:-0.02em;font-style:italic;margin-bottom:56px;">{e(fleet_label) if fleet_label else 'Fleet'}</div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
       <span style="color:#667085;font-size:15px;font-weight:500;">{e(vessel_count)} Vessels</span>
       <span style="color:#2e3438;font-size:15px;">·</span>
@@ -337,13 +472,14 @@ def build_page3(fleet_name, date_label, vessels):
         od = v['overdue']
         c_pct = v['critical_pct']
         a_pct = v['alert_pct']
+        m_pct = v['minor_pct']
         n_pct = v['normal_pct']
 
         if inactive:
             rows_html += f'''<tr>
           <td class="vn" style="color:#9CA3AF;">{e(name)}</td>
           <td class="sl">—</td><td class="sl">—</td>
-          <td class="sl">—</td><td class="sl">—</td><td class="sl">—</td>
+          <td class="sl">—</td><td class="sl">—</td>
           <td><span style="font-size:8px;color:#C4C9D0;font-weight:700;letter-spacing:0.07em;">NEWLY ACTIVATED</span></td>
         </tr>'''
             continue
@@ -364,17 +500,22 @@ def build_page3(fleet_name, date_label, vessels):
         od_str = str(od) if od is not None else '—'
         c_str  = f'{int(c_pct)}%' if c_pct is not None else '—'
         a_str  = f'{int(a_pct)}%' if a_pct is not None else '—'
-        n_str  = f'{int(n_pct)}%' if n_pct is not None else '—'
         mo_str = str(v['months']) if v['months'] is not None else '—'
 
-        bar = cond_bar(c_pct, a_pct, n_pct)
+        # Trend arrows vs prior month (only when prior data exists). Compare the
+        # displayed integer for critical % so the arrow matches the shown value.
+        c_prev = v['critical_pct_prev']
+        od_arrow = trend_arrow(od, v['overdue_prev'])
+        c_arrow  = trend_arrow(int(c_pct) if c_pct is not None else None,
+                               int(c_prev) if c_prev is not None else None)
+
+        bar = cond_bar(c_pct, a_pct, m_pct, n_pct)
         rows_html += f'''<tr>
           <td class="vn" style="{name_style}">{e(name)}</td>
           <td class="sl">{e(mo_str)}</td>
-          <td style="color:{od_color};{od_bold}">{e(od_str)}</td>
-          <td style="color:{c_color};{c_bold}">{e(c_str)}</td>
+          <td style="color:{od_color};{od_bold}">{e(od_str)}{od_arrow}</td>
+          <td style="color:{c_color};{c_bold}">{e(c_str)}{c_arrow}</td>
           <td style="color:{a_color};{a_bold}">{e(a_str)}</td>
-          <td class="nm">{e(n_str)}</td>
           <td>{bar}</td>
         </tr>'''
 
@@ -387,7 +528,7 @@ def build_page3(fleet_name, date_label, vessels):
       <thead>
         <tr>
           <th>Vessel</th><th>Months</th><th>Overdue</th>
-          <th>Critical %</th><th>Alert %</th><th>Normal %</th><th>Condition</th>
+          <th>Critical %</th><th>Alert %</th><th>Condition</th>
         </tr>
       </thead>
       <tbody>{rows_html}</tbody>
@@ -397,6 +538,7 @@ def build_page3(fleet_name, date_label, vessels):
       <div style="display:flex;gap:12px;align-items:center;">
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#D2393C;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Critical</span></span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#DD7814;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Alert</span></span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#EBB71A;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Minor</span></span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#439B38;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Normal</span></span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#E8E8E6;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Unmonitored</span></span>
       </div>
@@ -498,13 +640,13 @@ def repack_bundle(prefix, inner_html, suffix):
 
 # ── Assemble full document from reference skeleton ────────────────────────────
 def build_report(template_path, vessels, fleet_name, date_label, vessel_count,
-                 exec_paras, spotlights, priorities, recs):
+                 exec_paras, spotlights, priorities, recs, fleet_label=None):
     with open(template_path, 'r', encoding='utf-8') as f:
         outer = f.read()
     prefix, inner, suffix = split_bundle(outer)
 
     # Build the 4 pages
-    p1 = build_page1(fleet_name, vessel_count, date_label)
+    p1 = build_page1(fleet_name, vessel_count, date_label, fleet_label)
     p2 = build_page2(fleet_name, date_label, exec_paras, spotlights)
     p3 = build_page3(fleet_name, date_label, vessels)
     p4 = build_page4(fleet_name, date_label, priorities, recs)
@@ -543,21 +685,49 @@ def main():
     ap.add_argument('--template',     required=True, help='Path to reference standalone HTML')
     ap.add_argument('--out',          required=True)
     ap.add_argument('--fleet',        required=False)
+    ap.add_argument('--tag',          required=False,
+                    help='Sub-report mode: keep only vessels whose tag equals this value '
+                         '(e.g. Fleet1, GroupD). Splits a multi-fleet company into per-fleet reports.')
+    ap.add_argument('--include-untagged', action='store_true',
+                    help='With --tag, also keep vessels that have a blank tag (one-off, '
+                         'e.g. vessels whose source tag was not yet set for this month).')
+    ap.add_argument('--fleet-label',  required=False,
+                    help='Cover label for the fleet (e.g. "Fleet 1"). Defaults to a tidied '
+                         'form of --tag.')
+    ap.add_argument('--date-ym',      required=False,
+                    help='Override the reporting month as YYYY-MM. By default the month is '
+                         'taken from the data (the input month folder), not the run date.')
     args = ap.parse_args()
 
-    fleet_name = (args.fleet or extract_fleet_name(args.summary)).upper()
+    default_fleet = extract_fleet_name(args.summary)
+    if args.summary.lower().endswith('.json'):
+        default_fleet = company_name_from_json(args.summary) or default_fleet
+    fleet_name = (args.fleet or default_fleet).upper()
 
-    # Date is always the current month at runtime
-    now        = datetime.datetime.now()
-    date_ym    = now.strftime('%Y-%m')
-    date_label = now.strftime('%B %Y')
+    # Reporting month comes from the DATA (input month folder / filename), not the
+    # clock — so a routine run in June over the MAY 2026 folder still reports May 2026.
+    date_ym, date_label = derive_report_date(args.summary, args.date_ym)
 
-    # Read Excel data
-    sum_rows  = rows_to_dicts(read_rows(args.summary))
+    # Read summary data — company JSON (cron_fetch.py) or legacy Excel/CSV
+    sum_rows  = load_summary(args.summary)
     ext_rows  = rows_to_dicts(read_rows(args.extra)) if args.extra else []
-    prev_rows = rows_to_dicts(read_rows(args.summary_prev)) if args.summary_prev else []
+    prev_rows = load_summary(args.summary_prev) if args.summary_prev else []
 
     vessels = build_vessel_data(sum_rows, ext_rows, prev_rows)
+
+    # Sub-report mode: filter to one fleet (tag). --include-untagged also keeps
+    # blank-tag vessels (used when a vessel's source tag was set late).
+    fleet_label = None
+    if args.tag:
+        want = args.tag.strip()
+        kept = [v for v in vessels
+                if v['tags'] == want or (args.include_untagged and not v['tags'])]
+        if not kept:
+            print(f"ERROR: no vessels match tag {want!r} in {args.summary}")
+            sys.exit(2)
+        vessels = kept
+        fleet_label = args.fleet_label or fleet_label_from_tag(want)
+
     active  = [v for v in vessels if not v['inactive']]
     vessel_count = str(len(active))
 
@@ -566,7 +736,8 @@ def main():
     # 2) write exec_paras, spotlights, priorities, recs into the HTML
 
     # Print extracted vessel data for Claude to analyse
-    print(f"\n=== EXTRACTED VESSEL DATA ({fleet_name} / {date_label}) ===")
+    scope = f" / {fleet_label}" if fleet_label else ""
+    print(f"\n=== EXTRACTED VESSEL DATA ({fleet_name}{scope} / {date_label}) ===")
     for v in vessels:
         status = "INACTIVE" if v['inactive'] else "active"
         delta = ''
@@ -578,6 +749,7 @@ def main():
               f"crit={v['critical_pct']}%, alert={v['alert_pct']}%, "
               f"normal={v['normal_pct']}%, low_alarm={v['low_alarm']}, {status}")
     print(f"\nActive vessels: {vessel_count}")
+    print(f"Reporting month (from data): date_ym={date_ym}  date_label={date_label}")
 
     # Default placeholders — Claude replaces these in the skill workflow
     exec_paras = f'<p style="font-size:13.5px;line-height:1.78;color:#22282B;margin-bottom:20px;">Fleet condition monitoring report for {e(fleet_name)}, {e(date_label)}. [Claude: replace with executive summary paragraphs]</p>'
@@ -606,13 +778,14 @@ def main():
     ]
 
     html = build_report(args.template, vessels, fleet_name, date_label,
-                        vessel_count, exec_paras, spotlights, priorities, recs)
+                        vessel_count, exec_paras, spotlights, priorities, recs,
+                        fleet_label=fleet_label)
 
     with open(args.out, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"\nHTML written -> {args.out}")
-    print("Next: edit the HTML to fill in exec summary, spotlights, priorities, and recommendations")
-    print("Then: node scripts/print_pdf.js output.html output.pdf")
+    print("Next: write the intelligence JSON, then: python3 inject_report.py --json <intel.json> --out <final.html>")
+    print("Then: python3 print_pdf.py <final.html> <output.pdf>")
 
 if __name__ == '__main__':
     main()
