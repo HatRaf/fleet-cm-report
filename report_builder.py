@@ -464,76 +464,17 @@ def build_page2(fleet_name, date_label, exec_paras, spotlights):
   {page_footer(fleet_name, date_label)}
 </section>'''
 
-def build_page3(fleet_name, date_label, vessels):
-    rows_html = ''
-    for v in vessels:
-        name = v['name']
-        inactive = v['inactive']
-        od = v['overdue']
-        c_pct = v['critical_pct']
-        a_pct = v['alert_pct']
-        m_pct = v['minor_pct']
-        n_pct = v['normal_pct']
+# Max vessel rows per Fleet Overview page before spilling onto a continuation page.
+PAGE_ROWS_3 = 24
 
-        if inactive:
-            rows_html += f'''<tr>
-          <td class="vn" style="color:#9CA3AF;">{e(name)}</td>
-          <td class="sl">—</td><td class="sl">—</td>
-          <td class="sl">—</td><td class="sl">—</td>
-          <td><span style="font-size:8px;color:#C4C9D0;font-weight:700;letter-spacing:0.07em;">NEWLY ACTIVATED</span></td>
-        </tr>'''
-            continue
-
-        od_color = overdue_color(od)
-        c_color  = pct_color(c_pct, [(5,'#D2393C'),(2,'#D2393C')])
-        a_color  = pct_color(a_pct, [(7,'#D2393C'),(5,'#DD7814')])
-        n_color  = '#439B38'
-
-        # Name coloring (red if vessel is critical)
-        name_style = 'color:#D2393C;' if c_pct and c_pct >= 7 else \
-                     'color:#439B38;' if od == 0 else ''
-
-        od_bold = 'font-weight:700;' if od and (od >= 80 or od == 0) else ''
-        c_bold  = 'font-weight:700;' if c_pct and c_pct >= 5 else ''
-        a_bold  = 'font-weight:700;' if a_pct and a_pct >= 5 else ''
-
-        od_str = str(od) if od is not None else '—'
-        c_str  = f'{int(c_pct)}%' if c_pct is not None else '—'
-        a_str  = f'{int(a_pct)}%' if a_pct is not None else '—'
-        mo_str = str(v['months']) if v['months'] is not None else '—'
-
-        # Trend arrows vs prior month (only when prior data exists). Compare the
-        # displayed integer for critical % so the arrow matches the shown value.
-        c_prev = v['critical_pct_prev']
-        od_arrow = trend_arrow(od, v['overdue_prev'])
-        c_arrow  = trend_arrow(int(c_pct) if c_pct is not None else None,
-                               int(c_prev) if c_prev is not None else None)
-
-        bar = cond_bar(c_pct, a_pct, m_pct, n_pct)
-        rows_html += f'''<tr>
-          <td class="vn" style="{name_style}">{e(name)}</td>
-          <td class="sl">{e(mo_str)}</td>
-          <td style="color:{od_color};{od_bold}">{e(od_str)}{od_arrow}</td>
-          <td style="color:{c_color};{c_bold}">{e(c_str)}{c_arrow}</td>
-          <td style="color:{a_color};{a_bold}">{e(a_str)}</td>
-          <td>{bar}</td>
-        </tr>'''
-
-    return f'''<!-- ══ PAGE 3: FLEET OVERVIEW ════════════════════════════════════════════ -->
-<section data-screen-label="03 Fleet Overview">
-  {page_header(fleet_name, 3, 4, date_label)}
-  <div class="pc">
-    <div class="sec">Fleet Overview</div>
-    <table class="ft">
-      <thead>
+_P3_THEAD = '''<thead>
         <tr>
           <th>Vessel</th><th>Months</th><th>Overdue</th>
           <th>Critical %</th><th>Alert %</th><th>Condition</th>
         </tr>
-      </thead>
-      <tbody>{rows_html}</tbody>
-    </table>
-    <div style="display:flex;gap:14px;margin-top:14px;align-items:center;">
+      </thead>'''
+
+_P3_LEGEND = '''<div style="display:flex;gap:14px;margin-top:14px;align-items:center;">
       <span style="font-size:9px;color:#C4C9D0;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">Condition bar:</span>
       <div style="display:flex;gap:12px;align-items:center;">
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#D2393C;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Critical</span></span>
@@ -542,10 +483,76 @@ def build_page3(fleet_name, date_label, vessels):
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#439B38;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Normal</span></span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:7px;height:7px;background:#E8E8E6;border-radius:1px;display:inline-block;"></span><span style="font-size:10px;color:#9CA3AF;">Unmonitored</span></span>
       </div>
-    </div>
+    </div>'''
+
+def _vessel_row_html(v):
+    """Render one Fleet Overview table row for a vessel."""
+    name = v['name']
+    if v['inactive']:
+        return f'''<tr>
+          <td class="vn" style="color:#9CA3AF;">{e(name)}</td>
+          <td class="sl">—</td><td class="sl">—</td>
+          <td class="sl">—</td><td class="sl">—</td>
+          <td><span style="font-size:8px;color:#C4C9D0;font-weight:700;letter-spacing:0.07em;">NEWLY ACTIVATED</span></td>
+        </tr>'''
+
+    od = v['overdue']; c_pct = v['critical_pct']; a_pct = v['alert_pct']
+    m_pct = v['minor_pct']; n_pct = v['normal_pct']
+    od_color = overdue_color(od)
+    c_color  = pct_color(c_pct, [(5,'#D2393C'),(2,'#D2393C')])
+    a_color  = pct_color(a_pct, [(7,'#D2393C'),(5,'#DD7814')])
+    name_style = 'color:#D2393C;' if c_pct and c_pct >= 7 else \
+                 'color:#439B38;' if od == 0 else ''
+    od_bold = 'font-weight:700;' if od and (od >= 80 or od == 0) else ''
+    c_bold  = 'font-weight:700;' if c_pct and c_pct >= 5 else ''
+    a_bold  = 'font-weight:700;' if a_pct and a_pct >= 5 else ''
+    od_str = str(od) if od is not None else '—'
+    c_str  = f'{int(c_pct)}%' if c_pct is not None else '—'
+    a_str  = f'{int(a_pct)}%' if a_pct is not None else '—'
+    mo_str = str(v['months']) if v['months'] is not None else '—'
+    # Trend arrows vs prior month; compare the displayed integer for critical %.
+    c_prev = v['critical_pct_prev']
+    od_arrow = trend_arrow(od, v['overdue_prev'])
+    c_arrow  = trend_arrow(int(c_pct) if c_pct is not None else None,
+                           int(c_prev) if c_prev is not None else None)
+    bar = cond_bar(c_pct, a_pct, m_pct, n_pct)
+    return f'''<tr>
+          <td class="vn" style="{name_style}">{e(name)}</td>
+          <td class="sl">{e(mo_str)}</td>
+          <td style="color:{od_color};{od_bold}">{e(od_str)}{od_arrow}</td>
+          <td style="color:{c_color};{c_bold}">{e(c_str)}{c_arrow}</td>
+          <td style="color:{a_color};{a_bold}">{e(a_str)}</td>
+          <td>{bar}</td>
+        </tr>'''
+
+def _page3_section(fleet_name, date_label, rows_html, cont):
+    """One Fleet Overview page (header repeated, table header + legend per page).
+    Page number is a placeholder (0); renumber_pages() fixes it once the full
+    document is assembled."""
+    title = 'Fleet Overview' + (
+        ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>' if cont else '')
+    return f'''<section data-screen-label="03 Fleet Overview">
+  {page_header(fleet_name, 0, 0, date_label)}
+  <div class="pc">
+    <div class="sec">{title}</div>
+    <table class="ft">
+      {_P3_THEAD}
+      <tbody>{rows_html}</tbody>
+    </table>
+    {_P3_LEGEND}
   </div>
   {page_footer(fleet_name, date_label)}
 </section>'''
+
+def build_page3(fleet_name, date_label, vessels):
+    """Fleet Overview — one row per vessel, spilling onto continuation pages when
+    there are more vessels than fit on a single A4 page."""
+    rows = [_vessel_row_html(v) for v in vessels]
+    chunks = [rows[i:i + PAGE_ROWS_3] for i in range(0, len(rows), PAGE_ROWS_3)] or [[]]
+    parts = ['<!-- ══ PAGE 3: FLEET OVERVIEW ════════════════════════════════════════════ -->']
+    for idx, chunk in enumerate(chunks):
+        parts.append(_page3_section(fleet_name, date_label, ''.join(chunk), cont=(idx > 0)))
+    return '\n'.join(parts)
 
 def build_page4(fleet_name, date_label, priorities, recs):
     pri_rows = ''
@@ -638,6 +645,20 @@ def repack_bundle(prefix, inner_html, suffix):
     packed = packed.replace('</', '<\\/')    # keep </script> from closing the tag
     return prefix + '\n  ' + packed + '\n  ' + suffix
 
+# ── Dynamic page numbering ────────────────────────────────────────────────────
+def renumber_pages(html):
+    """Rewrite every 'Page X of Y' header so it reflects the actual number of
+    <section> pages. The cover is section 1 (it has no header); every other
+    section carries one 'Page X of Y'. This lets Fleet Overview / Priority spill
+    onto continuation pages without hardcoding a total."""
+    total = len(re.findall(r'<section\b', html))
+    counter = {'n': 0}
+    def fix(m):
+        counter['n'] += 1
+        return re.sub(r'Page\s+\d+\s+of\s+\d+',
+                      f'Page {counter["n"]} of {total}', m.group(0))
+    return re.sub(r'<section\b.*?</section>', fix, html, flags=re.DOTALL)
+
 # ── Assemble full document from reference skeleton ────────────────────────────
 def build_report(template_path, vessels, fleet_name, date_label, vessel_count,
                  exec_paras, spotlights, priorities, recs, fleet_label=None):
@@ -662,6 +683,9 @@ def build_report(template_path, vessels, fleet_name, date_label, vessel_count,
 {p4}
 
 </deck-stage>'''
+
+    # Fix 'Page X of Y' across all sections now that the real page count is known.
+    new_body = renumber_pages(new_body)
 
     # Replace the deck-stage content in the decoded inner HTML
     inner = re.sub(

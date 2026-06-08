@@ -5,8 +5,8 @@ into the staging HTML, producing a final HTML ready for PDF conversion.
 
 Usage:
     python3 inject_report.py \
-        --json "C:\\Fleet Overview Report\\Staging\\EXAMPLE_2026-05.json" \
-        --out  "C:\\Fleet Overview Report\\Staging\\EXAMPLE_2026-05_final.html"
+        --json "C:\\Fleet Overview Report\\Staging\\ACME_2026-05.json" \
+        --out  "C:\\Fleet Overview Report\\Staging\\ACME_2026-05_final.html"
 """
 
 import argparse
@@ -155,52 +155,66 @@ def build_page2(data):
   </div>
 </section>'''
 
+# ── Dynamic page numbering ────────────────────────────────────────────────────
+def renumber_pages(html):
+    """Rewrite every 'Page X of Y' header so it reflects the actual number of
+    <section> pages (cover = page 1, no header). Keeps numbering correct when
+    Fleet Overview or Priority Assessment spill onto continuation pages."""
+    total = len(re.findall(r'<section\b', html))
+    counter = {'n': 0}
+    def fix(m):
+        counter['n'] += 1
+        return re.sub(r'Page\s+\d+\s+of\s+\d+',
+                      f'Page {counter["n"]} of {total}', m.group(0))
+    return re.sub(r'<section\b.*?</section>', fix, html, flags=re.DOTALL)
+
 # ── Page 4: Priority + Recommendations ───────────────────────────────────────
-def build_page4(data):
-    fleet = e(data['fleet'])
-    date  = e(data['date_label'])
+# Priority rows that fit on one A4 page before spilling to a continuation page.
+# Kept conservative because the Key Issue column can wrap to two lines.
+PAGE_ROWS_4 = 20
 
-    pri_rows = ''
-    for p in data['priorities']:
-        level   = p.get('level', 'N/A')
-        dimmed  = p.get('dimmed', False)
-        v_color = vessel_name_color(level, dimmed)
-        i_color = '#C4C9D0' if dimmed else '#9CA3AF'
-        pri_rows += f'''<tr>
-          <td style="padding:7px 8px 7px 12px;border-bottom:1px solid #F0EFED;">{rank_box(p["rank"], level)}</td>
-          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;font-weight:700;letter-spacing:0.04em;color:{v_color};">{e(p["vessel"])}</td>
-          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;">{level_badge(level)}</td>
-          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;color:{i_color};">{e(p["key_issue"])}</td>
-        </tr>'''
-
-    recs_html = '\n'.join(rec_card(r) for r in data['recommendations'])
-
-    return f'''<!-- ══ PAGE 4: PRIORITY ASSESSMENT & RECOMMENDATIONS ════════════════════ -->
-<section data-screen-label="04 Priority &amp; Recommendations">
-  <div class="ph">
-    <div class="ph-logo">
-      <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
-      <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
-    </div>
-    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 4 of 4 · {date}</div>
-  </div>
-  <div class="pc">
-    <div class="sec">Priority Assessment</div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:14px;">
-      <thead>
+_PRI_THEAD = '''<thead>
         <tr>
           <th style="background:#F5F5F3;padding:8px 8px 8px 12px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:6px 0 0 6px;width:34px;">#</th>
           <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:168px;">Vessel</th>
           <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:116px;">Level</th>
           <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:0 6px 6px 0;">Key Issue</th>
         </tr>
-      </thead>
-      <tbody>{pri_rows}</tbody>
-    </table>
-    <div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>
-    <div class="sec" style="margin-bottom:10px;">Recommendations</div>
-    {recs_html}
-    <div style="flex:1;"></div>
+      </thead>'''
+
+def _p4_ph(fleet, date):
+    return f'''<div class="ph">
+    <div class="ph-logo">
+      <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
+      <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
+    </div>
+    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 0 of 0 · {date}</div>
+  </div>'''
+
+def _p4_pf(fleet, date):
+    return f'''<div class="pf">
+    <span>HAT Analytics Solutions Ltd · Fleet Condition Monitoring Report</span>
+    <span>{fleet} FLEET · {date}</span>
+  </div>'''
+
+def _pri_row_html(p):
+    level   = p.get('level', 'N/A')
+    dimmed  = p.get('dimmed', False)
+    v_color = vessel_name_color(level, dimmed)
+    i_color = '#C4C9D0' if dimmed else '#9CA3AF'
+    return f'''<tr>
+          <td style="padding:7px 8px 7px 12px;border-bottom:1px solid #F0EFED;">{rank_box(p["rank"], level)}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;font-weight:700;letter-spacing:0.04em;color:{v_color};">{e(p["vessel"])}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;">{level_badge(level)}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #F0EFED;font-size:11px;color:{i_color};">{e(p["key_issue"])}</td>
+        </tr>'''
+
+def _pri_table(rows_html):
+    return (f'<table style="width:100%;border-collapse:collapse;margin-bottom:14px;">'
+            f'\n      {_PRI_THEAD}\n      <tbody>{rows_html}</tbody>\n    </table>')
+
+def _sig_block():
+    return f'''<div style="flex:1;"></div>
     <div style="height:1px;background:#E8E8E6;margin-bottom:18px;margin-top:14px;"></div>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
@@ -211,13 +225,54 @@ def build_page4(data):
         <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
         <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
       </div>
-    </div>
+    </div>'''
+
+def _p4_section(fleet, date, title, body):
+    return f'''<section data-screen-label="04 Priority &amp; Recommendations">
+  {_p4_ph(fleet, date)}
+  <div class="pc">
+    <div class="sec">{title}</div>
+    {body}
   </div>
-  <div class="pf">
-    <span>HAT Analytics Solutions Ltd · Fleet Condition Monitoring Report</span>
-    <span>{fleet} FLEET · {date}</span>
-  </div>
+  {_p4_pf(fleet, date)}
 </section>'''
+
+def build_page4(data):
+    """Priority Assessment table (one row per vessel) + Recommendations, spilling
+    onto continuation pages when there are more vessels than fit on one A4 page.
+    The Recommendations + signature block rides on the last priority page when it
+    fits, otherwise on its own continuation page."""
+    fleet = e(data['fleet'])
+    date  = e(data['date_label'])
+    pri   = [_pri_row_html(p) for p in data['priorities']]
+    recs_html = '\n'.join(rec_card(r) for r in data['recommendations'])
+    n_recs = len(data['recommendations'])
+
+    chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
+    last = len(chunks) - 1
+    # Do the Recommendations + signature fit under the last priority page? Use a
+    # worst-case pixel budget for the ~968px page content area (priority rows can
+    # wrap to two lines = ~44px). If not, they get their own continuation page.
+    used_px = 70 + len(chunks[last]) * 44 + 56 + n_recs * 34 + 120
+    recs_on_last = used_px <= 968
+
+    recs_trailer = (f'<div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>\n'
+                    f'    <div class="sec" style="margin-bottom:10px;">Recommendations</div>\n'
+                    f'    {recs_html}\n    {_sig_block()}')
+
+    sections = []
+    for i, ch in enumerate(chunks):
+        cont = ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>' if i else ''
+        body = _pri_table(''.join(ch))
+        if i == last and recs_on_last:
+            body += '\n    ' + recs_trailer
+        sections.append(_p4_section(fleet, date, 'Priority Assessment' + cont, body))
+    if not recs_on_last:
+        body = f'{recs_html}\n    {_sig_block()}'
+        sections.append(_p4_section(fleet, date, 'Recommendations', body))
+
+    return ('<!-- ══ PAGE 4: PRIORITY ASSESSMENT & RECOMMENDATIONS ════════════════════ -->\n'
+            + '\n'.join(sections))
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
@@ -265,6 +320,9 @@ def main():
     date  = data['date_label']
     new_title = f'<title>{e(fleet)} Fleet — Fleet Condition Monitoring Report — {e(date)}</title>'
     html = re.sub(r'<title>[^<]*</title>', lambda _: new_title, html)
+
+    # Final authority on 'Page X of Y' now that pages 3 and 4 may span multiple pages.
+    html = renumber_pages(html)
 
     with open(args.out, 'w', encoding='utf-8') as f:
         f.write(repack_bundle(prefix, html, suffix))
