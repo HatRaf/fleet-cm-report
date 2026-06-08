@@ -341,14 +341,24 @@ def spotlight_card(label, vessel, detail, border_color, bg_color, label_color, b
         <div style="color:#667085;font-size:12px;">{e(detail)}</div>
       </div>'''
 
+# Vessels whose source name ends with '-ONLINE' are system placeholders, not real
+# monitored vessels — they are excluded from the report entirely.
+EXCLUDE_RE = re.compile(r'-\s*ONLINE\s*$', re.IGNORECASE)
+
+def is_excluded_vessel(name):
+    return bool(EXCLUDE_RE.search(str(name).strip()))
+
 # ── Build vessel data ─────────────────────────────────────────────────────────
 def build_vessel_data(sum_rows, ext_rows, prev_rows=None):
     ext_map = {str(r.get('ship_name','')).strip().upper(): r for r in ext_rows}
     prev_map = {str(r.get('ship_name','')).strip().upper(): r for r in (prev_rows or [])}
     vessels = []
+    excluded = []
     for r in sum_rows:
         name = str(r.get('ship_name', '')).strip().upper()
         if not name: continue
+        if is_excluded_vessel(name):
+            excluded.append(name); continue
         ex   = ext_map.get(name, {})
         prev = prev_map.get(name, {})
         uploads = safe_int(r.get('all_uploads') or r.get('uploads_since_hat_start_date') or r.get('uploads_since_start'))
@@ -372,6 +382,8 @@ def build_vessel_data(sum_rows, ext_rows, prev_rows=None):
             'low_alarm': low_alarm, 'inactive': inactive,
             'tags': str(r.get('tags', '') or '').strip(),
         })
+    if excluded:
+        print(f"Excluded {len(excluded)} '-ONLINE' vessel(s): {', '.join(excluded)}")
     return vessels
 
 # ── Fleet (sub-report) helpers ────────────────────────────────────────────────
