@@ -45,10 +45,13 @@ def repack_bundle(prefix, inner_html, suffix):
 
 # ── Spotlight card styles ─────────────────────────────────────────────────────
 SPOTLIGHT_STYLES = {
-    'MOST CRITICAL':      ('#FEF2F2', '#FECACA', '#D2393C', '#D2393C'),
-    'STALLED COMPLIANCE': ('#FFFBEB', '#FDE68A', '#D97706', '#EBB71A'),
-    'MOST IMPROVED':      ('#F0FDF4', '#BBF7D0', '#439B38', '#439B38'),
-    'BEST COMPLIANCE':    ('#ECFEFF', '#A5F3FC', '#00AABC', '#00AABC'),
+    'MOST CRITICAL':              ('#FEF2F2', '#FECACA', '#D2393C', '#D2393C'),
+    'STALLED CM PLAN COMPLIANCE': ('#FFFBEB', '#FDE68A', '#D97706', '#EBB71A'),
+    'MOST IMPROVED':              ('#F0FDF4', '#BBF7D0', '#439B38', '#439B38'),
+    'BEST CM PLAN COMPLIANCE':    ('#ECFEFF', '#A5F3FC', '#00AABC', '#00AABC'),
+    # legacy label aliases (pre 'CM Plan Compliance' rename)
+    'STALLED COMPLIANCE':         ('#FFFBEB', '#FDE68A', '#D97706', '#EBB71A'),
+    'BEST COMPLIANCE':            ('#ECFEFF', '#A5F3FC', '#00AABC', '#00AABC'),
 }
 
 def spotlight_card(s):
@@ -140,7 +143,7 @@ def build_page2(data):
       <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
       <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
     </div>
-    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 2 of 4 · {date}</div>
+    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 2 of 4 · Reporting period: {date}</div>
   </div>
   <div class="pc">
     <div class="sec">Executive Summary</div>
@@ -177,7 +180,7 @@ _PRI_THEAD = '''<thead>
         <tr>
           <th style="background:#F5F5F3;padding:8px 8px 8px 12px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:6px 0 0 6px;width:34px;">#</th>
           <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:168px;">Vessel</th>
-          <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:116px;">Level</th>
+          <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;width:116px;">Priority</th>
           <th style="background:#F5F5F3;padding:8px 10px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:0 6px 6px 0;">Key Issue</th>
         </tr>
       </thead>'''
@@ -188,7 +191,7 @@ def _p4_ph(fleet, date):
       <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
       <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
     </div>
-    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 0 of 0 · {date}</div>
+    <div class="ph-right">{fleet} FLEET · Fleet Condition Monitoring Report<br>Page 0 of 0 · Reporting period: {date}</div>
   </div>'''
 
 def _p4_pf(fleet, date):

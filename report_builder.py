@@ -420,7 +420,7 @@ def build_page1(fleet_name, vessel_count, date_label, fleet_label=None):
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
       <span style="color:#667085;font-size:15px;font-weight:500;">{e(vessel_count)} Vessels</span>
       <span style="color:#2e3438;font-size:15px;">·</span>
-      <span style="color:#667085;font-size:15px;font-weight:500;">{e(date_label)}</span>
+      <span style="color:#667085;font-size:15px;font-weight:500;">Reporting period: {e(date_label)}</span>
     </div>
     <div style="flex:1;"></div>
     <div style="height:1px;background:#242424;margin-bottom:22px;"></div>
@@ -448,7 +448,7 @@ def page_header(fleet_name, page_num, total_pages, date_label):
       <img src="a65ae821-fec6-4d3a-9ffe-6ed1dfcab9e7" alt="">
       <span class="ph-logo-text"><span>HAT</span>ANALYTICS</span>
     </div>
-    <div class="ph-right">{e(fleet_name)} FLEET · Fleet Condition Monitoring Report<br>Page {page_num} of {total_pages} · {e(date_label)}</div>
+    <div class="ph-right">{e(fleet_name)} FLEET · Fleet Condition Monitoring Report<br>Page {page_num} of {total_pages} · Reporting period: {e(date_label)}</div>
   </div>'''
 
 def page_footer(fleet_name, date_label):
@@ -481,7 +481,7 @@ PAGE_ROWS_3 = 24
 
 _P3_THEAD = '''<thead>
         <tr>
-          <th>Vessel</th><th>Months</th><th>Overdue</th>
+          <th>Vessel</th><th>CM Months</th><th>Overdue</th>
           <th>Critical %</th><th>Alert %</th><th>Condition</th>
         </tr>
       </thead>'''
@@ -559,7 +559,7 @@ def _page3_section(fleet_name, date_label, rows_html, cont):
 def build_page3(fleet_name, date_label, vessels):
     """Fleet Overview — one row per vessel, spilling onto continuation pages when
     there are more vessels than fit on a single A4 page."""
-    rows = [_vessel_row_html(v) for v in vessels]
+    rows = [_vessel_row_html(v) for v in sorted(vessels, key=lambda v: v['name'])]
     chunks = [rows[i:i + PAGE_ROWS_3] for i in range(0, len(rows), PAGE_ROWS_3)] or [[]]
     parts = ['<!-- ══ PAGE 3: FLEET OVERVIEW ════════════════════════════════════════════ -->']
     for idx, chunk in enumerate(chunks):
@@ -793,11 +793,11 @@ def main():
     spotlights = [
         {'label':'MOST CRITICAL',      'vessel':'[VESSEL]', 'detail':'[detail]',
          'bg_color':'#FEF2F2','border_color':'#FECACA','label_color':'#D2393C','border_side':'#D2393C'},
-        {'label':'STALLED COMPLIANCE', 'vessel':'[VESSEL]', 'detail':'[detail]',
+        {'label':'STALLED CM PLAN COMPLIANCE', 'vessel':'[VESSEL]', 'detail':'[detail]',
          'bg_color':'#FFFBEB','border_color':'#FDE68A','label_color':'#D97706','border_side':'#EBB71A'},
         {'label':'MOST IMPROVED',      'vessel':'[VESSEL]', 'detail':'[detail]',
          'bg_color':'#F0FDF4','border_color':'#BBF7D0','label_color':'#439B38','border_side':'#439B38'},
-        {'label':'BEST COMPLIANCE',    'vessel':'[VESSEL]', 'detail':'[detail]',
+        {'label':'BEST CM PLAN COMPLIANCE',    'vessel':'[VESSEL]', 'detail':'[detail]',
          'bg_color':'#ECFEFF','border_color':'#A5F3FC','label_color':'#00AABC','border_side':'#00AABC'},
     ]
 
