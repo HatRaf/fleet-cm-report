@@ -29,11 +29,12 @@ import xml.etree.ElementTree as ET
 import datetime
 import html as html_mod
 
-# Report signature block — supplied at runtime via env vars so the public repo
-# carries no identifying info. Set HAT_CERTS / HAT_SUPERVISOR / HAT_EMAIL to real values.
-SIG_CERTS      = os.environ.get('HAT_CERTS', 'Certifications on file')
-SIG_SUPERVISOR = os.environ.get('HAT_SUPERVISOR', 'Report supervisor')
-SIG_EMAIL      = os.environ.get('HAT_EMAIL', 'contact@example.com')
+# Report signature block — HAT Analytics' own issuer credentials (service certs,
+# approving manager, contact email; not client data). Hardcoded as defaults so they
+# always render; env vars HAT_CERTS / HAT_SUPERVISOR / HAT_EMAIL still override.
+SIG_CERTS      = os.environ.get('HAT_CERTS', 'ABS: 24-6450997-A<br>LR: LR26178988DT')
+SIG_SUPERVISOR = os.environ.get('HAT_SUPERVISOR', 'Tassos Garantziotis<br>Technical Manager')
+SIG_EMAIL      = os.environ.get('HAT_EMAIL', 'info@hat-analytics.net')
 
 # ── Excel reader (zipfile + ElementTree, avoids openpyxl breakage) ────────────
 NS  = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}

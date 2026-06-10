@@ -172,10 +172,6 @@ def renumber_pages(html):
     return re.sub(r'<section\b.*?</section>', fix, html, flags=re.DOTALL)
 
 # ── Page 4: Priority + Recommendations ───────────────────────────────────────
-# Priority rows that fit on one A4 page before spilling to a continuation page.
-# Kept conservative because the Key Issue column can wrap to two lines.
-PAGE_ROWS_4 = 20
-
 _PRI_THEAD = '''<thead>
         <tr>
           <th style="background:#F5F5F3;padding:8px 8px 8px 12px;font-size:9px;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:#667085;text-align:left;border-radius:6px 0 0 6px;width:34px;">#</th>
@@ -226,11 +222,41 @@ def _p4_section(fleet, date, title, body):
   {_p4_pf(fleet, date)}
 </section>'''
 
-# Page-4 layout budget (px) for the ~968px content area. Rec cards can wrap to two
-# lines, so plan for worst-case height.
-P4_CONTENT_PX   = 968
-P4_SEC_TITLE_PX = 40    # the section title on a page
-P4_REC_PX       = 50    # one recommendation card (2-line)
+# Page-4 layout budget (px). The Priority table's Key Issue column wraps to two or
+# three lines for many vessels, so a fixed rows-per-page count either overflows or
+# wastes space. Instead we estimate each row's rendered height and pack pages to a
+# safe pixel budget. Constants below are calibrated against the real Chromium render
+# (content area 967px inside 32px padding; a 3-line row measures 66px) with a margin.
+P4_CONTENT_PX    = 950   # usable content height of the .pc area (real 967, less safety)
+P4_SEC_TITLE_PX  = 48    # section title (16) + its margin (18) + table margin (14)
+P4_PRI_HEAD_PX   = 30    # priority table header row (measured)
+P4_ROW_BASE_PX   = 17    # vertical padding + border of one priority row
+P4_LINE_PX       = 18    # height of one wrapped line in the Key Issue cell (real ~17.3)
+P4_KEY_CHARS     = 50    # characters that fit on one Key Issue line (cell ~312px @ 11px)
+P4_REC_PX        = 50    # one recommendation card (worst-case two lines)
+
+def _pri_row_px(p):
+    """Conservative (upper-bound) rendered height of one priority row, accounting
+    for the Key Issue text wrapping onto multiple lines."""
+    import math
+    key   = str(p.get('key_issue', ''))
+    lines = max(1, math.ceil(len(key) / P4_KEY_CHARS))
+    return P4_ROW_BASE_PX + lines * P4_LINE_PX
+
+def _pack_by_px(items, sizes, budget):
+    """Greedily group items so each group's summed size stays within budget.
+    Always keeps at least one item per group so an unusually tall single row
+    gets its own page instead of looping forever."""
+    pages, cur, used = [], [], 0
+    for it, sz in zip(items, sizes):
+        if cur and used + sz > budget:
+            pages.append(cur)
+            cur, used = [], 0
+        cur.append(it)
+        used += sz
+    if cur:
+        pages.append(cur)
+    return pages or [[]]
 
 _CONT = ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>'
 
@@ -246,9 +272,11 @@ def build_page4(data):
 
     sections = []
 
-    # Priority Assessment — paginated, table only.
-    pri_chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
-    for i, ch in enumerate(pri_chunks):
+    # Priority Assessment — packed by estimated height so Key Issue wrapping can
+    # never push the table past the page.
+    pri_budget = P4_CONTENT_PX - P4_SEC_TITLE_PX - P4_PRI_HEAD_PX
+    pri_sizes  = [_pri_row_px(p) for p in data['priorities']]
+    for i, ch in enumerate(_pack_by_px(pri, pri_sizes, pri_budget)):
         title = 'Priority Assessment' + (_CONT if i else '')
         sections.append(_p4_section(fleet, date, title, _pri_table(''.join(ch))))
 
