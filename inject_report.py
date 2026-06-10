@@ -226,53 +226,39 @@ def _p4_section(fleet, date, title, body):
   {_p4_pf(fleet, date)}
 </section>'''
 
-# Page-4 layout budget (px) for the ~968px content area. Priority rows and rec
-# cards can wrap to two lines, so plan for worst-case heights.
+# Page-4 layout budget (px) for the ~968px content area. Rec cards can wrap to two
+# lines, so plan for worst-case height.
 P4_CONTENT_PX   = 968
-P4_PRI_HEAD_PX  = 70    # "Priority Assessment" title + table header
-P4_ROW_PX       = 44    # one priority row (2-line key issue)
-P4_RECS_HEAD_PX = 56    # divider + "Recommendations" sub-heading (after a table)
+P4_SEC_TITLE_PX = 40    # the section title on a page
 P4_REC_PX       = 50    # one recommendation card (2-line)
-P4_SEC_TITLE_PX = 40    # a bare section title on a dedicated recommendations page
 
 _CONT = ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>'
 
 def build_page4(data):
-    """Priority Assessment table + Recommendations, each paginating onto
-    continuation pages when they exceed one A4 page. No signature block on page 4
-    (the cover carries the certifications / approval)."""
+    """Priority Assessment table, then Recommendations — each on its own page(s),
+    paginating onto continuation pages when they exceed one A4 page. Recommendations
+    ALWAYS start a fresh page (never crammed under the priority table). No signature
+    block on page 4 (the cover carries the certifications / approval)."""
     fleet = e(data['fleet'])
     date  = e(data['date_label'])
     pri   = [_pri_row_html(p) for p in data['priorities']]
     rec_cards = [rec_card(r) for r in data['recommendations']]
 
-    pri_chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
     sections = []
-    placed_recs = False
 
+    # Priority Assessment — paginated, table only.
+    pri_chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
     for i, ch in enumerate(pri_chunks):
-        body = _pri_table(''.join(ch))
-        # On the last priority page, fit as many recommendation cards as the
-        # leftover space allows; any remainder spills to dedicated pages below.
-        if i == len(pri_chunks) - 1 and rec_cards:
-            free = P4_CONTENT_PX - (P4_PRI_HEAD_PX + len(ch) * P4_ROW_PX) - P4_RECS_HEAD_PX
-            n_fit = max(0, free // P4_REC_PX)
-            if n_fit >= 1:
-                here, rec_cards = rec_cards[:n_fit], rec_cards[n_fit:]
-                body += ('\n    <div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>'
-                         '\n    <div class="sec" style="margin-bottom:10px;">Recommendations</div>\n    '
-                         + '\n    '.join(here))
-                placed_recs = True
         title = 'Priority Assessment' + (_CONT if i else '')
-        sections.append(_p4_section(fleet, date, title, body))
+        sections.append(_p4_section(fleet, date, title, _pri_table(''.join(ch))))
 
-    # Remaining recommendations on their own page(s).
-    per_page = max(1, (P4_CONTENT_PX - P4_SEC_TITLE_PX) // P4_REC_PX)
-    while rec_cards:
-        page, rec_cards = rec_cards[:per_page], rec_cards[per_page:]
-        title = 'Recommendations' + (_CONT if placed_recs else '')
-        sections.append(_p4_section(fleet, date, title, '\n    '.join(page)))
-        placed_recs = True
+    # Recommendations — always on their own page(s).
+    if rec_cards:
+        per_page = max(1, (P4_CONTENT_PX - P4_SEC_TITLE_PX) // P4_REC_PX)
+        rec_chunks = [rec_cards[i:i + per_page] for i in range(0, len(rec_cards), per_page)]
+        for j, page in enumerate(rec_chunks):
+            title = 'Recommendations' + (_CONT if j else '')
+            sections.append(_p4_section(fleet, date, title, '\n    '.join(page)))
 
     return ('<!-- ══ PAGE 4: PRIORITY ASSESSMENT & RECOMMENDATIONS ════════════════════ -->\n'
             + '\n'.join(sections))
