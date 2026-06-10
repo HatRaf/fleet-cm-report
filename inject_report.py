@@ -216,20 +216,6 @@ def _pri_table(rows_html):
     return (f'<table style="width:100%;border-collapse:collapse;margin-bottom:14px;">'
             f'\n      {_PRI_THEAD}\n      <tbody>{rows_html}</tbody>\n    </table>')
 
-def _sig_block():
-    return f'''<div style="flex:1;"></div>
-    <div style="height:1px;background:#E8E8E6;margin-bottom:18px;margin-top:14px;"></div>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-      <div>
-        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">HAT services certified by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_CERTS}</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
-        <div style="color:#22282B;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
-      </div>
-    </div>'''
-
 def _p4_section(fleet, date, title, body):
     return f'''<section data-screen-label="04 Priority &amp; Recommendations">
   {_p4_ph(fleet, date)}
@@ -240,39 +226,53 @@ def _p4_section(fleet, date, title, body):
   {_p4_pf(fleet, date)}
 </section>'''
 
+# Page-4 layout budget (px) for the ~968px content area. Priority rows and rec
+# cards can wrap to two lines, so plan for worst-case heights.
+P4_CONTENT_PX   = 968
+P4_PRI_HEAD_PX  = 70    # "Priority Assessment" title + table header
+P4_ROW_PX       = 44    # one priority row (2-line key issue)
+P4_RECS_HEAD_PX = 56    # divider + "Recommendations" sub-heading (after a table)
+P4_REC_PX       = 50    # one recommendation card (2-line)
+P4_SEC_TITLE_PX = 40    # a bare section title on a dedicated recommendations page
+
+_CONT = ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>'
+
 def build_page4(data):
-    """Priority Assessment table (one row per vessel) + Recommendations, spilling
-    onto continuation pages when there are more vessels than fit on one A4 page.
-    The Recommendations + signature block rides on the last priority page when it
-    fits, otherwise on its own continuation page."""
+    """Priority Assessment table + Recommendations, each paginating onto
+    continuation pages when they exceed one A4 page. No signature block on page 4
+    (the cover carries the certifications / approval)."""
     fleet = e(data['fleet'])
     date  = e(data['date_label'])
     pri   = [_pri_row_html(p) for p in data['priorities']]
-    recs_html = '\n'.join(rec_card(r) for r in data['recommendations'])
-    n_recs = len(data['recommendations'])
+    rec_cards = [rec_card(r) for r in data['recommendations']]
 
-    chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
-    last = len(chunks) - 1
-    # Do the Recommendations + signature fit under the last priority page? Use a
-    # worst-case pixel budget for the ~968px page content area (priority rows can
-    # wrap to two lines = ~44px). If not, they get their own continuation page.
-    used_px = 70 + len(chunks[last]) * 44 + 56 + n_recs * 34 + 120
-    recs_on_last = used_px <= 968
-
-    recs_trailer = (f'<div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>\n'
-                    f'    <div class="sec" style="margin-bottom:10px;">Recommendations</div>\n'
-                    f'    {recs_html}\n    {_sig_block()}')
-
+    pri_chunks = [pri[i:i + PAGE_ROWS_4] for i in range(0, len(pri), PAGE_ROWS_4)] or [[]]
     sections = []
-    for i, ch in enumerate(chunks):
-        cont = ' <span style="color:#C4C9D0;font-weight:600;">(continued)</span>' if i else ''
+    placed_recs = False
+
+    for i, ch in enumerate(pri_chunks):
         body = _pri_table(''.join(ch))
-        if i == last and recs_on_last:
-            body += '\n    ' + recs_trailer
-        sections.append(_p4_section(fleet, date, 'Priority Assessment' + cont, body))
-    if not recs_on_last:
-        body = f'{recs_html}\n    {_sig_block()}'
-        sections.append(_p4_section(fleet, date, 'Recommendations', body))
+        # On the last priority page, fit as many recommendation cards as the
+        # leftover space allows; any remainder spills to dedicated pages below.
+        if i == len(pri_chunks) - 1 and rec_cards:
+            free = P4_CONTENT_PX - (P4_PRI_HEAD_PX + len(ch) * P4_ROW_PX) - P4_RECS_HEAD_PX
+            n_fit = max(0, free // P4_REC_PX)
+            if n_fit >= 1:
+                here, rec_cards = rec_cards[:n_fit], rec_cards[n_fit:]
+                body += ('\n    <div style="height:1px;background:#F0EFED;margin:12px 0 14px;"></div>'
+                         '\n    <div class="sec" style="margin-bottom:10px;">Recommendations</div>\n    '
+                         + '\n    '.join(here))
+                placed_recs = True
+        title = 'Priority Assessment' + (_CONT if i else '')
+        sections.append(_p4_section(fleet, date, title, body))
+
+    # Remaining recommendations on their own page(s).
+    per_page = max(1, (P4_CONTENT_PX - P4_SEC_TITLE_PX) // P4_REC_PX)
+    while rec_cards:
+        page, rec_cards = rec_cards[:per_page], rec_cards[per_page:]
+        title = 'Recommendations' + (_CONT if placed_recs else '')
+        sections.append(_p4_section(fleet, date, title, '\n    '.join(page)))
+        placed_recs = True
 
     return ('<!-- ══ PAGE 4: PRIORITY ASSESSMENT & RECOMMENDATIONS ════════════════════ -->\n'
             + '\n'.join(sections))

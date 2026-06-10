@@ -430,7 +430,7 @@ def build_page1(fleet_name, vessel_count, date_label, fleet_label=None):
         <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">{SIG_CERTS}</div>
       </div>
       <div style="text-align:right;">
-        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report supervised by</div>
+        <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:7px;">Report approved by</div>
         <div style="color:#D9D9D9;font-size:12px;line-height:1.85;">{SIG_SUPERVISOR}</div>
       </div>
     </div>
