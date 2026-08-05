@@ -142,6 +142,11 @@ dispatcher routine specifies any such cases.
       * Never use "only" before a number or percentage (no "only 65%") — state the figure plainly.
       * Say "CM Plan compliance", never bare "compliance".
       * Any month-over-month change is phrased "compared to the previous month".
+      * Never use the word "dispatch" anywhere in the report (exec summary, spotlights,
+        key issues, recommendations). Never phrase actions as arranging, requesting or
+        sending out services/support/visits — measurements are planned and taken onboard.
+        Use instead: "Give highest priority to …", "Prioritise …", "Plan measurements
+        on …", "Schedule measurements on …", "Follow up on …", "Ensure …".
   - Use colored HTML for vessel names:
       critical  → <strong style="color:#D2393C;">VESSEL</strong>
       improved  → <strong style="color:#439B38;">VESSEL</strong>
@@ -185,6 +190,11 @@ dispatcher routine specifies any such cases.
   RECOMMENDATIONS — 3-6 items, ordered by urgency:
   - Reference specific vessel names and exact numbers from script output
   - Levels: URGENT / HIGH / MEDIUM / LOW / INFO
+  - Never use the word "dispatch" (no "Dispatch urgent support"), and never phrase
+    actions as arranging/requesting services, support or visits — measurements are
+    planned and taken onboard by the crew. Start action items with phrases like
+    "Give highest priority to …", "Prioritise …", "Plan measurements on …",
+    "Schedule measurements on …", "Follow up on …", "Ensure …".
 
 #### 4d. Cross-check before proceeding
   Verify all of the following before moving on:
